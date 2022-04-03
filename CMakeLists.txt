@@ -11,16 +11,24 @@ set(DIVISIBLE_INSTALL_INCLUDE_DIR ${PROJECT_SOURCE_DIR}/include)
 set(DIVISIBLE_INSTALL_BIN_DIR ${PROJECT_SOURCE_DIR}/bin)
 set(DIVISIBLE_INSTALL_LIB_DIR ${PROJECT_SOURCE_DIR}/lib)
 
+<<<<<<< HEAD
 set(DIVISION_HEADERS_DIR src/task1/utils)
+=======
+set(DIVISION_HEADERS_DIR ${PROJECT_SOURCE_DIR}/src/utils)
+>>>>>>> 92084b9... Add simple socket based client-server chat
 
 include_directories(${DIVISIBLE_INSTALL_INCLUDE_DIR})
 include_directories(${DIVISION_HEADERS_DIR})
 
+<<<<<<< HEAD
 include(CPM.cmake)
 CPMAddPackage("gh:lsalzman/enet@1.3.17")
 
 add_subdirectory(src/task1)
 add_subdirectory(src/task2)
+=======
+add_subdirectory(src)
+>>>>>>> 92084b9... Add simple socket based client-server chat
 # add_subdirectory(test)
 
 
