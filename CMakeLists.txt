@@ -19,7 +19,7 @@ include_directories(${DIVISION_HEADERS_DIR})
 include(CPM.cmake)
 CPMAddPackage("gh:lsalzman/enet@1.3.17")
 
-add_subdirectory(src/task1)
+#add_subdirectory(src/task1)
 add_subdirectory(src/task2)
 # add_subdirectory(test)
 
