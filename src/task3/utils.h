@@ -1,0 +1,8 @@
+//
+// Created by Nikita Krutoy on 09.04.2022.
+//
+
+#ifndef CMAKE_PROJECT_TEMPLATE_UTILS_H
+#define CMAKE_PROJECT_TEMPLATE_UTILS_H
+
+#endif //CMAKE_PROJECT_TEMPLATE_UTILS_H
