@@ -1,6 +1,7 @@
 test
 doc
 cmake-build-debug
+lib
 build
 .idea
 .vscode

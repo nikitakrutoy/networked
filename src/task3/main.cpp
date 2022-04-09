@@ -4,6 +4,7 @@
 #include <bgfx/bgfx.h>
 #include <bgfx/platform.h>
 #include <bx/timer.h>
+#include <bx/bounds.h>
 #include <debugdraw/debugdraw.h>
 #include <functional>
 #include "app.h"
@@ -35,16 +36,33 @@ void on_set_controlled_entity(ENetPacket *packet) {
     deserialize_set_controlled_entity(packet, my_entity);
 }
 
-void on_snapshot(ENetPacket *packet) {
+void on_state(ENetPacket *packet, ENetPeer *serverPeer) {
     uint16_t eid = invalid_entity;
     float x = 0.f;
     float y = 0.f;
-    deserialize_snapshot(packet, eid, x, y);
-    // TODO: Direct adressing, of course!
+    deserialize_entity_state(packet, eid, x, y);
     for (Entity &e: entities)
         if (e.eid == eid) {
             e.x = x;
             e.y = y;
+        }
+    send_respawn(serverPeer, eid);
+}
+
+void on_snapshot(ENetPacket *packet) {
+    uint16_t eid = invalid_entity;
+    float x = 0.f;
+    float y = 0.f;
+    float r = 0.5;
+    deserialize_snapshot(packet, eid, x, y, r);
+    // TODO: Direct adressing, of course!
+    for (Entity &e: entities)
+        if (e.eid == eid) {
+            if (e.eid != my_entity) {
+                e.x = x;
+                e.y = y;
+            }
+            e.r = r;
         }
 }
 
@@ -84,7 +102,6 @@ int main(int argc, const char **argv) {
     float proj[16];
     bx::mtxLookAt(view, bx::load<bx::Vec3>(&eye.x), bx::load<bx::Vec3>(&at.x), bx::load<bx::Vec3>(&up.x));
 
-
     bool connected = false;
     int64_t now = bx::getHPCounter();
     int64_t last = now;
@@ -108,6 +125,10 @@ int main(int argc, const char **argv) {
                             break;
                         case E_SERVER_TO_CLIENT_SNAPSHOT:
                             on_snapshot(event.packet);
+                            break;
+                        case E_STATE:
+                            on_state(event.packet, serverPeer);
+                        default:
                             break;
                     };
                     break;
@@ -150,7 +171,8 @@ int main(int argc, const char **argv) {
             dde.push();
 
             dde.setColor(e.color);
-            dde.drawQuad(bx::Vec3(0.f, 0.f, 1.f), bx::Vec3(e.x, e.y, -0.01f), 1.f);
+            auto sphere = bx::Sphere({bx::Vec3(e.x, e.y, -0.01f), e.r});
+            dde.draw(sphere);
 
             dde.pop();
         }

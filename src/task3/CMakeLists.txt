@@ -4,8 +4,8 @@ set(CMAKE_CXX_STANDARD 20)
 
 find_package(OpenGL REQUIRED)
 
-set(APP_SOURCE_FILES app.cpp main.cpp protocol.cpp)
-set(SERVER_SOURCE_FILES server.cpp protocol.cpp)
+set(APP_SOURCE_FILES app.cpp main.cpp protocol.cpp protocol.h)
+set(SERVER_SOURCE_FILES server.cpp protocol.cpp protocol.h)
 
 add_executable(task3-app ${APP_SOURCE_FILES})
 add_executable(task3-server ${SERVER_SOURCE_FILES})

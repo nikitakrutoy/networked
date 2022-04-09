@@ -5,9 +5,97 @@
 #include <stdlib.h>
 #include <vector>
 #include <map>
+#include <random>
+
+struct Point {
+    float x;
+    float y;
+};
 
 static std::vector<Entity> entities;
 static std::map<uint16_t, ENetPeer *> controlledMap;
+static size_t ai_entities_num = 5;
+static std::vector<Point> dests;
+
+
+int width = 8;
+int height = 8;
+
+uint16_t randint(int min, int max) {
+    std::random_device dev;
+    std::mt19937 rng(dev());
+    std::uniform_int_distribution<std::mt19937::result_type> dist(min, max); // distribution in range [1, 6]
+    return dist(rng);
+}
+
+void create_ai_entities() {
+    for (uint16_t i = 0; i < ai_entities_num; i++) {
+        Entity ent{
+            .color = 0xff22ff88,
+            .x = float(randint(0, width * 2) - width),
+            .y = float(randint(0, height * 2) - height),
+            .eid = i,
+            .r = float(randint(1, 10)) / 10.f,
+        };
+        entities.push_back(ent);
+        dests.push_back(Point({ent.x, ent.y}));
+    }
+}
+
+void respawn(Entity &e) {
+    e.x = float(randint(0, width * 2) - width);
+    e.y = float(randint(0, height * 2) - height);
+}
+
+float speed = 0.05;
+void update_ai_entities() {
+    for (int i = 0; i < ai_entities_num; i++) {
+        float dir_x = dests[i].x - entities[i].x;
+        float dir_y = dests[i].y - entities[i].y;
+        float dist = dir_x * dir_x + dir_y * dir_y;
+        if (dist < 0.01) {
+            dests[i] = Point({float(randint(0, width)), float(randint(0, height))});
+        }
+        else {
+            entities[i].x += dir_x / std::sqrt(dist) * speed;
+            entities[i].y += dir_y / std::sqrt(dist) * speed;
+        }
+    }
+}
+
+void collide(ENetHost *server ) {
+    for (auto &e1: entities) {
+        for (auto &e2: entities) {
+            if (e1.eid == e2.eid)
+                continue;
+            float dir_x = e1.x - e2.x;
+            float dir_y = e1.y - e2.y;
+            float dist = dir_x * dir_x + dir_y * dir_y;
+            float k = 0.2f;
+            if (dist < (e1.r + e2.r) * (e1.r + e2.r)) {
+                Entity* e;
+                if (e1.r > e2.r) {
+                    e1.r = std::min(e1.r + e2.r * k, 3.f);
+                    respawn(e2);
+                    e = &e2;
+                }
+                else {
+                    e2.r = std::min(e2.r + e1.r * k, 3.f);
+                    respawn(e1);
+                    e = &e1;
+                }
+
+                if (e->eid >= ai_entities_num) {
+                    e->respawning = true;
+                    for (size_t i = 0; i < server->peerCount; ++i) {
+                        ENetPeer *peer = &server->peers[i];
+                        send_entity_state(peer, e->eid, e->x, e->y);
+                    }
+                }
+            }
+        }
+    }
+}
 
 void on_join(ENetPacket *packet, ENetPeer *peer, ENetHost *host) {
     // send all entities
@@ -44,13 +132,24 @@ void on_state(ENetPacket *packet) {
     float y = 0.f;
     deserialize_entity_state(packet, eid, x, y);
     for (Entity &e: entities)
-        if (e.eid == eid) {
+        if (e.eid == eid && !e.respawning) {
             e.x = x;
             e.y = y;
         }
 }
 
+void on_respawn(ENetPacket *packet) {
+    uint16_t eid;
+    deserialize_spawn(packet, eid);
+    for (Entity &e: entities)
+        if (e.eid == eid ) {
+            e.respawning = false;
+        }
+}
+
 int main(int argc, const char **argv) {
+    create_ai_entities();
+
     if (enet_initialize() != 0) {
         printf("Cannot init ENet");
         return 1;
@@ -79,9 +178,11 @@ int main(int argc, const char **argv) {
                         case E_CLIENT_TO_SERVER_JOIN:
                             on_join(event.packet, event.peer, server);
                             break;
-                        case E_CLIENT_TO_SERVER_STATE:
+                        case E_STATE:
                             on_state(event.packet);
                             break;
+                        case E_RESPAWN:
+                            on_respawn(event.packet);
                     };
                     enet_packet_destroy(event.packet);
                     break;
@@ -90,12 +191,13 @@ int main(int argc, const char **argv) {
             };
         }
         static int t = 0;
-        for (const Entity &e: entities)
+        for (Entity &e: entities)
             for (size_t i = 0; i < server->peerCount; ++i) {
                 ENetPeer *peer = &server->peers[i];
-                if (controlledMap[e.eid] != peer)
-                    send_snapshot(peer, e.eid, e.x, e.y);
+                send_snapshot(peer, e.eid, e.x, e.y, e.r);
             }
+        update_ai_entities();
+        collide(server);
         usleep(100000);
     }
 
