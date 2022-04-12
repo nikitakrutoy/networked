@@ -15,12 +15,29 @@
 
 
 #include <vector>
+#include <deque>
+#include <map>
 #include "entity.h"
 #include "protocol.h"
 
+struct Snapshot {
+    uint16_t eid;
+    float x;
+    float y;
+    float ori;
+    uint32_t time;
+};
 
+static std::map<uint16_t , std::deque<Snapshot>> snapshots;
 static std::vector<Entity> entities;
 static uint16_t my_entity = invalid_entity;
+
+static std::map<uint16_t, Snapshot> prev_snapshot;
+static std::map<uint16_t, Snapshot> current_snapshot;
+
+static std::map<uint16_t, uint32_t> start_client_time;
+
+bool INTERPOLATION_ON = false;
 
 void on_new_entity_packet(ENetPacket *packet) {
     Entity newEntity;
@@ -30,26 +47,40 @@ void on_new_entity_packet(ENetPacket *packet) {
         if (e.eid == newEntity.eid)
             return; // don't need to do anything, we already have entity
     entities.push_back(newEntity);
+    if (INTERPOLATION_ON) {
+        Entity e = newEntity;
+        start_client_time[e.eid] = enet_time_get();
+        current_snapshot[e.eid] = Snapshot({e.eid,e.x,e.y, e.ori, start_client_time[e.eid]});
+        prev_snapshot[e.eid] = current_snapshot[e.eid];
+        prev_snapshot[e.eid].time = current_snapshot[e.eid].time - 1;
+    }
+
+
 }
 
 void on_set_controlled_entity(ENetPacket *packet) {
     deserialize_set_controlled_entity(packet, my_entity);
 }
 
-void on_snapshot(ENetPacket *packet) {
+void on_snapshot(ENetEvent *event) {
     uint16_t eid = invalid_entity;
     float x = 0.f;
     float y = 0.f;
     float ori = 0.f;
-    deserialize_snapshot(packet, eid, x, y, ori);
-    // TODO: Direct adressing, of course!
-    for (Entity &e: entities)
-        if (e.eid == eid) {
-            e.x = x;
-            e.y = y;
-            e.ori = ori;
-        }
+    deserialize_snapshot(event->packet, eid, x, y, ori);
+    if (INTERPOLATION_ON)
+        snapshots[eid].push_back({
+            eid, x, y, ori, enet_time_get() - event->peer->roundTripTime
+        });
+    else
+        for (Entity &e: entities)
+            if (e.eid == my_entity) {
+                e.x = x;
+                e.y = y;
+                e.ori = ori;
+            }
 }
+
 
 int main(int argc, const char **argv) {
     if (enet_initialize() != 0) {
@@ -92,6 +123,9 @@ int main(int argc, const char **argv) {
     int64_t now = bx::getHPCounter();
     int64_t last = now;
     float dt = 0.f;
+
+    bool keyGate = false;
+
     while (!app_should_close()) {
         ENetEvent event;
         while (enet_host_service(client, &event, 0) > 0) {
@@ -110,7 +144,9 @@ int main(int argc, const char **argv) {
                             on_set_controlled_entity(event.packet);
                             break;
                         case E_SERVER_TO_CLIENT_SNAPSHOT:
-                            on_snapshot(event.packet);
+                            on_snapshot(&event);
+                            break;
+                        default:
                             break;
                     };
                     break;
@@ -123,8 +159,25 @@ int main(int argc, const char **argv) {
             bool right = app_keypressed(GLFW_KEY_RIGHT);
             bool up = app_keypressed(GLFW_KEY_UP);
             bool down = app_keypressed(GLFW_KEY_DOWN);
+
+            if (app_keypressed(GLFW_KEY_I) && !keyGate && !INTERPOLATION_ON) {
+                INTERPOLATION_ON = true;
+            }
+
+            if (!app_keypressed(GLFW_KEY_I) && !keyGate && INTERPOLATION_ON) {
+                keyGate = true;
+            }
+
+            if (app_keypressed(GLFW_KEY_I) && keyGate && INTERPOLATION_ON) {
+                INTERPOLATION_ON = false;
+            }
+
+            if (!app_keypressed(GLFW_KEY_I) && keyGate && !INTERPOLATION_ON) {
+                keyGate = false;
+            }
+
             // TODO: Direct adressing, of course!
-            for (Entity &e: entities)
+            for (Entity &e: entities) {
                 if (e.eid == my_entity) {
                     // Update
                     float thr = (up ? 1.f : 0.f) + (down ? -1.f : 0.f);
@@ -132,7 +185,29 @@ int main(int argc, const char **argv) {
 
                     // Send
                     send_entity_input(serverPeer, my_entity, thr, steer);
+
                 }
+
+                if (!INTERPOLATION_ON)
+                    continue;
+                
+                // Interpolation
+                uint32_t current_client_time = enet_time_get();
+                float alpha = float(current_client_time - start_client_time[e.eid]) /
+                              float(current_snapshot[e.eid].time - prev_snapshot[e.eid].time);
+
+                if (alpha <= 1) {
+                    e.x = prev_snapshot[e.eid].x * (1 - alpha) + current_snapshot[e.eid].x * alpha;
+                    e.y = prev_snapshot[e.eid].y * (1 - alpha) + current_snapshot[e.eid].y * alpha;
+                    e.ori = prev_snapshot[e.eid].ori * (1 - alpha) + current_snapshot[e.eid].ori * alpha;
+                }
+                if (!snapshots[e.eid].empty()) {
+                    start_client_time[e.eid] = enet_time_get();
+                    prev_snapshot[e.eid] = current_snapshot[e.eid];
+                    current_snapshot[e.eid] = snapshots[e.eid].front();
+                    snapshots[e.eid].pop_front();
+                }
+            }
         }
 
         app_poll_events();
@@ -161,12 +236,12 @@ int main(int argc, const char **argv) {
         }
 
         dde.end();
-
         // Advance to next frame. Process submitted rendering primitives.
         bgfx::frame();
         const double freq = double(bx::getHPFrequency());
         int64_t now = bx::getHPCounter();
-        dt = (float) ((now - last) / freq);
+        dt = (float) ((now - last));
+//        printf("%f\n", dt);
         last = now;
     }
     ddShutdown();

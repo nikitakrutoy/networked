@@ -35,7 +35,7 @@ void send_set_controlled_entity(ENetPeer *peer, uint16_t eid) {
 void send_entity_input(ENetPeer *peer, uint16_t eid, float thr, float ori) {
     ENetPacket *packet = enet_packet_create(nullptr, sizeof(uint8_t) + sizeof(uint16_t) +
                                                      2 * sizeof(float),
-                                            ENET_PACKET_FLAG_UNSEQUENCED);
+                                            ENET_PACKET_FLAG_RELIABLE);
     uint8_t *ptr = packet->data;
     *ptr = E_CLIENT_TO_SERVER_INPUT;
     ptr += sizeof(uint8_t);
@@ -52,7 +52,7 @@ void send_entity_input(ENetPeer *peer, uint16_t eid, float thr, float ori) {
 void send_snapshot(ENetPeer *peer, uint16_t eid, float x, float y, float ori) {
     ENetPacket *packet = enet_packet_create(nullptr, sizeof(uint8_t) + sizeof(uint16_t) +
                                                      3 * sizeof(float),
-                                            ENET_PACKET_FLAG_UNSEQUENCED);
+                                            ENET_PACKET_FLAG_RELIABLE);
     uint8_t *ptr = packet->data;
     *ptr = E_SERVER_TO_CLIENT_SNAPSHOT;
     ptr += sizeof(uint8_t);
