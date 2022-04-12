@@ -2,6 +2,7 @@ test
 doc
 cmake-build-debug
 build
+lib
 .idea
 .vscode
 No newline at en
