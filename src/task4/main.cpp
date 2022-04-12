@@ -47,15 +47,11 @@ void on_new_entity_packet(ENetPacket *packet) {
         if (e.eid == newEntity.eid)
             return; // don't need to do anything, we already have entity
     entities.push_back(newEntity);
-    if (INTERPOLATION_ON) {
-        Entity e = newEntity;
-        start_client_time[e.eid] = enet_time_get();
-        current_snapshot[e.eid] = Snapshot({e.eid,e.x,e.y, e.ori, start_client_time[e.eid]});
-        prev_snapshot[e.eid] = current_snapshot[e.eid];
-        prev_snapshot[e.eid].time = current_snapshot[e.eid].time - 1;
-    }
-
-
+    Entity e = newEntity;
+    start_client_time[e.eid] = enet_time_get();
+    current_snapshot[e.eid] = Snapshot({e.eid,e.x,e.y, e.ori, start_client_time[e.eid]});
+    prev_snapshot[e.eid] = current_snapshot[e.eid];
+    prev_snapshot[e.eid].time = current_snapshot[e.eid].time - 1;
 }
 
 void on_set_controlled_entity(ENetPacket *packet) {
@@ -74,7 +70,7 @@ void on_snapshot(ENetEvent *event) {
         });
     else
         for (Entity &e: entities)
-            if (e.eid == my_entity) {
+            if (e.eid == eid) {
                 e.x = x;
                 e.y = y;
                 e.ori = ori;
@@ -162,6 +158,12 @@ int main(int argc, const char **argv) {
 
             if (app_keypressed(GLFW_KEY_I) && !keyGate && !INTERPOLATION_ON) {
                 INTERPOLATION_ON = true;
+                for (auto &e : entities) {
+                    start_client_time[e.eid] = enet_time_get();
+                    current_snapshot[e.eid] = Snapshot({e.eid, e.x, e.y, e.ori, start_client_time[e.eid]});
+                    prev_snapshot[e.eid] = current_snapshot[e.eid];
+                    prev_snapshot[e.eid].time = current_snapshot[e.eid].time - 1;
+                }
             }
 
             if (!app_keypressed(GLFW_KEY_I) && !keyGate && INTERPOLATION_ON) {
@@ -170,6 +172,8 @@ int main(int argc, const char **argv) {
 
             if (app_keypressed(GLFW_KEY_I) && keyGate && INTERPOLATION_ON) {
                 INTERPOLATION_ON = false;
+                for (auto &e : entities)
+                    snapshots[e.eid].clear();
             }
 
             if (!app_keypressed(GLFW_KEY_I) && keyGate && !INTERPOLATION_ON) {
@@ -190,7 +194,7 @@ int main(int argc, const char **argv) {
 
                 if (!INTERPOLATION_ON)
                     continue;
-                
+
                 // Interpolation
                 uint32_t current_client_time = enet_time_get();
                 float alpha = float(current_client_time - start_client_time[e.eid]) /
@@ -201,7 +205,7 @@ int main(int argc, const char **argv) {
                     e.y = prev_snapshot[e.eid].y * (1 - alpha) + current_snapshot[e.eid].y * alpha;
                     e.ori = prev_snapshot[e.eid].ori * (1 - alpha) + current_snapshot[e.eid].ori * alpha;
                 }
-                if (!snapshots[e.eid].empty()) {
+                if (!snapshots[e.eid].empty() && alpha > 0.9) {
                     start_client_time[e.eid] = enet_time_get();
                     prev_snapshot[e.eid] = current_snapshot[e.eid];
                     current_snapshot[e.eid] = snapshots[e.eid].front();
@@ -241,7 +245,6 @@ int main(int argc, const char **argv) {
         const double freq = double(bx::getHPFrequency());
         int64_t now = bx::getHPCounter();
         dt = (float) ((now - last));
-//        printf("%f\n", dt);
         last = now;
     }
     ddShutdown();
