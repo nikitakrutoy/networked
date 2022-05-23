@@ -75,12 +75,12 @@ void collide(ENetHost *server ) {
             if (dist < (e1.r + e2.r) * (e1.r + e2.r)) {
                 Entity* e;
                 if (e1.r > e2.r) {
-                    e1.r = std::min(e1.r + e2.r * k, 3.f);
+                    e1.r = min(e1.r + e2.r * k, 3.f);
                     respawn(e2);
                     e = &e2;
                 }
                 else {
-                    e2.r = std::min(e2.r + e1.r * k, 3.f);
+                    e2.r = min(e2.r + e1.r * k, 3.f);
                     respawn(e1);
                     e = &e1;
                 }
@@ -105,7 +105,7 @@ void on_join(ENetPacket *packet, ENetPeer *peer, ENetHost *host) {
     // find max eid
     uint16_t maxEid = entities.empty() ? invalid_entity : entities[0].eid;
     for (const Entity &e: entities)
-        maxEid = std::max(maxEid, e.eid);
+        maxEid = max(maxEid, e.eid);
     uint16_t newEid = maxEid + 1;
     uint32_t color = 0xff000000 +
                      0x00440000 * (rand() % 5) +
@@ -198,7 +198,7 @@ int main(int argc, const char **argv) {
             }
         update_ai_entities();
         collide(server);
-        usleep(100000);
+        Sleep(100000);
     }
 
     enet_host_destroy(server);

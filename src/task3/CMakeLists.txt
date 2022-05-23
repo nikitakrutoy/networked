@@ -9,6 +9,15 @@ set(SERVER_SOURCE_FILES server.cpp protocol.cpp protocol.h)
 
 add_executable(task3-app ${APP_SOURCE_FILES})
 add_executable(task3-server ${SERVER_SOURCE_FILES})
+if(WIN32)
+    target_link_libraries(task3-app  wsock32 ws2_32)
+    target_link_libraries(task3-server  wsock32 ws2_32)
+endif()
+
+target_link_libraries(task3-server  winmm)
+target_link_libraries(task3-app  winmm)
+
+
 
 target_link_libraries(task3-app glfw)
 target_link_libraries(task3-app OpenGL::GL)
