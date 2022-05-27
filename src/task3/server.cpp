@@ -1,11 +1,11 @@
 #include <enet/enet.h>
-#include <iostream>
 #include "entity.h"
 #include "protocol.h"
-#include <stdlib.h>
+#include <cstdlib>
 #include <vector>
 #include <map>
 #include <random>
+#include "utils.h"
 
 struct Point {
     float x;
@@ -16,6 +16,7 @@ static std::vector<Entity> entities;
 static std::map<uint16_t, ENetPeer *> controlledMap;
 static size_t ai_entities_num = 5;
 static std::vector<Point> dests;
+static std::vector<ENetPeer*> players;
 
 
 int width = 8;
@@ -40,6 +41,28 @@ void create_ai_entities() {
         entities.push_back(ent);
         dests.push_back(Point({ent.x, ent.y}));
     }
+}
+
+void recreate_ai_entities(uint32_t new_num){
+    uint users_num = entities.size() - ai_entities_num;
+    dests.clear();
+    std::vector<Entity> new_entities;
+    for (uint16_t i = 0; i < new_num; i++) {
+        Entity ent{
+                .color = 0xff22ff88,
+                .x = float(randint(0, width * 2) - width),
+                .y = float(randint(0, height * 2) - height),
+                .eid = i,
+                .r = float(randint(1, 10)) / 10.f,
+        };
+        new_entities.push_back(ent);
+        dests.push_back(Point({ent.x, ent.y}));
+    }
+    for (int i = 0; i < users_num; i++) {
+        new_entities.push_back(entities[ai_entities_num + i]);
+    }
+    entities = new_entities;
+    ai_entities_num = new_num;
 }
 
 void respawn(Entity &e) {
@@ -75,20 +98,20 @@ void collide(ENetHost *server ) {
             if (dist < (e1.r + e2.r) * (e1.r + e2.r)) {
                 Entity* e;
                 if (e1.r > e2.r) {
-                    e1.r = min(e1.r + e2.r * k, 3.f);
+                    e1.r = fmin(e1.r + e2.r * k, 3.f);
                     respawn(e2);
                     e = &e2;
                 }
                 else {
-                    e2.r = min(e2.r + e1.r * k, 3.f);
+                    e2.r = fmin(e2.r + e1.r * k, 3.f);
                     respawn(e1);
                     e = &e1;
                 }
 
                 if (e->eid >= ai_entities_num) {
                     e->respawning = true;
-                    for (size_t i = 0; i < server->peerCount; ++i) {
-                        ENetPeer *peer = &server->peers[i];
+                    for (size_t i = 0; i < players.size(); ++i) {
+                        ENetPeer *peer = players[i];
                         send_entity_state(peer, e->eid, e->x, e->y);
                     }
                 }
@@ -97,15 +120,22 @@ void collide(ENetHost *server ) {
     }
 }
 
+void on_set_ai_num(ENetPacket *packet) {
+    uint32_t ai_num;
+    deserialize_set_ai_num(packet, ai_num);
+    recreate_ai_entities(ai_num);
+}
+
 void on_join(ENetPacket *packet, ENetPeer *peer, ENetHost *host) {
     // send all entities
+    players.push_back(peer);
     for (const Entity &ent: entities)
         send_new_entity(peer, ent);
 
     // find max eid
     uint16_t maxEid = entities.empty() ? invalid_entity : entities[0].eid;
     for (const Entity &e: entities)
-        maxEid = max(maxEid, e.eid);
+        maxEid = fmax(maxEid, e.eid);
     uint16_t newEid = maxEid + 1;
     uint32_t color = 0xff000000 +
                      0x00440000 * (rand() % 5) +
@@ -120,8 +150,8 @@ void on_join(ENetPacket *packet, ENetPeer *peer, ENetHost *host) {
 
 
     // send info about new entity to everyone
-    for (size_t i = 0; i < host->peerCount; ++i)
-        send_new_entity(&host->peers[i], ent);
+    for (size_t i = 0; i < players.size(); ++i)
+        send_new_entity(players[i], ent);
     // send info about controlled entity
     send_set_controlled_entity(peer, newEid);
 }
@@ -155,11 +185,11 @@ int main(int argc, const char **argv) {
         return 1;
     }
     ENetAddress address;
+    enet_address_set_host(&address, "localhost");
+//    address.host = ENET_HOST_ANY;
+    address.port = parse_uint(argv[1]);
 
-    address.host = ENET_HOST_ANY;
-    address.port = 10131;
-
-    ENetHost *server = enet_host_create(&address, 32, 2, 0, 0);
+    ENetHost *server = enet_host_create(&address, 16, 2, 0, 0);
 
     if (!server) {
         printf("Cannot create ENet server\n");
@@ -183,6 +213,8 @@ int main(int argc, const char **argv) {
                             break;
                         case E_RESPAWN:
                             on_respawn(event.packet);
+                        case E_SERVER_SET_AI_NUM:
+                            on_set_ai_num(event.packet);
                     };
                     enet_packet_destroy(event.packet);
                     break;
@@ -192,13 +224,13 @@ int main(int argc, const char **argv) {
         }
         static int t = 0;
         for (Entity &e: entities)
-            for (size_t i = 0; i < server->peerCount; ++i) {
-                ENetPeer *peer = &server->peers[i];
+            for (size_t i = 0; i < players.size(); ++i) {
+                ENetPeer *peer = players[i];
                 send_snapshot(peer, e.eid, e.x, e.y, e.r);
             }
         update_ai_entities();
         collide(server);
-        Sleep(100000);
+        usleep(100000);
     }
 
     enet_host_destroy(server);

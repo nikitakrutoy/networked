@@ -9,10 +9,11 @@
 #include <functional>
 #include "app.h"
 #include <enet/enet.h>
+#include <iostream>
+#include <future>
 
 //for scancodes
 #include <GLFW/glfw3.h>
-
 
 #include <vector>
 #include "entity.h"
@@ -22,10 +23,39 @@
 static std::vector<Entity> entities;
 static uint16_t my_entity = invalid_entity;
 
+void on_server_data(ENetPacket *packet, ENetPeer* server, ENetPeer* lobby, ENetHost* host) {
+    uint32_t port;
+    deserialize_server_data(packet, port);
+    ENetAddress address;
+    enet_address_set_host(&address, "localhost");
+    address.port = port;
+    server = enet_host_connect(host, &address, 2, 0);
+    if (!server) {
+        printf("Cannot connect to server localhost:%d", port);
+    }
+
+}
+
+void on_lobby_info(ENetPacket *packet) {
+    std::vector<RoomInfo> data;
+    deserialize_lobby_info(packet, data);
+    for (int i = 0; i < data.size(); i++) {
+        printf("Room %d, players - %d, ai_num - %d. ", i, data[i].peers_num, data[i].ai_num);
+        if (data[i].is_game_started)
+            printf("Started.");
+        printf("\n");
+    }
+}
+
+void on_message(ENetPacket *packet) {
+    std::string msg;
+    deserialize_message(packet, msg);
+    printf("%s\n", msg.c_str());
+}
+
 void on_new_entity_packet(ENetPacket *packet) {
     Entity newEntity;
     deserialize_new_entity(packet, newEntity);
-    // TODO: Direct adressing, of course!
     for (const Entity &e: entities)
         if (e.eid == newEntity.eid)
             return; // don't need to do anything, we already have entity
@@ -55,7 +85,6 @@ void on_snapshot(ENetPacket *packet) {
     float y = 0.f;
     float r = 0.5;
     deserialize_snapshot(packet, eid, x, y, r);
-    // TODO: Direct adressing, of course!
     for (Entity &e: entities)
         if (e.eid == eid) {
             if (e.eid != my_entity) {
@@ -66,13 +95,21 @@ void on_snapshot(ENetPacket *packet) {
         }
 }
 
+static std::string get_input()
+{
+    std::string input;
+    getline(std::cin, input);
+    return input;
+}
+
+
 int main(int argc, const char **argv) {
     if (enet_initialize() != 0) {
         printf("Cannot init ENet");
         return 1;
     }
 
-    ENetHost *client = enet_host_create(nullptr, 1, 2, 0, 0);
+    ENetHost *client = enet_host_create(nullptr, 2, 2, 0, 0);
     if (!client) {
         printf("Cannot create ENet client\n");
         return 1;
@@ -80,13 +117,21 @@ int main(int argc, const char **argv) {
 
     ENetAddress address;
     enet_address_set_host(&address, "localhost");
-    address.port = 10131;
-
-    ENetPeer *serverPeer = enet_host_connect(client, &address, 2, 0);
-    if (!serverPeer) {
-        printf("Cannot connect to server");
+    address.port = 10887;
+    ENetPeer *lobbyPeer = nullptr;
+    lobbyPeer = enet_host_connect(client, &address, 2, 0);
+    if (!lobbyPeer) {
+        printf("Cannot connect to lobby");
         return 1;
     }
+//    enet_address_set_host(&address, "localhost");
+//    address.port = 10890;
+    ENetPeer *serverPeer = nullptr;
+//    serverPeer = enet_host_connect(client, &address, 2, 0);
+//    if (!serverPeer) {
+//        printf("Cannot connect to server");
+//        return 1;
+//    }
 
     int width = 1920;
     int height = 1080;
@@ -106,31 +151,66 @@ int main(int argc, const char **argv) {
     int64_t now = bx::getHPCounter();
     int64_t last = now;
     float dt = 0.f;
+    std::future<std::string> future = std::async(get_input);
     while (!app_should_close()) {
         ENetEvent event;
-        while (enet_host_service(client, &event, 0) > 0) {
+        std::string command;
+        bool is_input_ready = future.wait_for(std::chrono::seconds(0)) == std::future_status::ready;
+        while (enet_host_service(client, &event, 0) > 0 || is_input_ready) {
+
+            if (is_input_ready) {
+                std::string command = future.get();
+                is_input_ready = false;
+                future = std::async(get_input);
+                send_text_message(lobbyPeer, command);
+            }
+
             switch (event.type) {
                 case ENET_EVENT_TYPE_CONNECT:
-                    printf("Connection with %x:%u established\n", event.peer->address.host, event.peer->address.port);
-                    send_join(serverPeer);
-                    connected = true;
+
+                    if (event.peer == lobbyPeer) {
+                        printf("Connection with lobby %x:%u established\n", event.peer->address.host,
+                               event.peer->address.port);
+                    }
+                    else {
+                        serverPeer = event.peer;
+                        send_join(event.peer);
+                        printf("Connection with server %x:%u established\n", event.peer->address.host,
+                               event.peer->address.port);
+                    }
+
                     break;
                 case ENET_EVENT_TYPE_RECEIVE:
-                    switch (get_packet_type(event.packet)) {
-                        case E_SERVER_TO_CLIENT_NEW_ENTITY:
-                            on_new_entity_packet(event.packet);
-                            break;
-                        case E_SERVER_TO_CLIENT_SET_CONTROLLED_ENTITY:
-                            on_set_controlled_entity(event.packet);
-                            break;
-                        case E_SERVER_TO_CLIENT_SNAPSHOT:
-                            on_snapshot(event.packet);
-                            break;
-                        case E_STATE:
-                            on_state(event.packet, serverPeer);
-                        default:
-                            break;
-                    };
+                    if (event.peer = serverPeer) {
+                        switch (get_packet_type(event.packet)) {
+                            case E_SERVER_TO_CLIENT_NEW_ENTITY:
+                                on_new_entity_packet(event.packet);
+                                break;
+                            case E_SERVER_TO_CLIENT_SET_CONTROLLED_ENTITY:
+                                on_set_controlled_entity(event.packet);
+                                break;
+                            case E_SERVER_TO_CLIENT_SNAPSHOT:
+                                on_snapshot(event.packet);
+                                break;
+                            case E_STATE:
+                                on_state(event.packet, serverPeer);
+                            default:
+                                break;
+                        };
+                    }
+                    if (event.peer = lobbyPeer) {
+                        switch (get_packet_type(event.packet)) {
+                            case E_SERVER_DATA:
+                                on_server_data(event.packet, serverPeer, lobbyPeer, client);
+                                break;
+                            case E_LOBBY_INFO:
+                                on_lobby_info(event.packet);
+                            case E_TEXT_MESSAGE:
+                                on_message(event.packet);
+                            default:
+                                break;
+                        };
+                    }
                     break;
                 default:
                     break;
@@ -141,7 +221,6 @@ int main(int argc, const char **argv) {
             bool right = app_keypressed(GLFW_KEY_RIGHT);
             bool up = app_keypressed(GLFW_KEY_UP);
             bool down = app_keypressed(GLFW_KEY_DOWN);
-            // TODO: Direct adressing, of course!
             for (Entity &e: entities)
                 if (e.eid == my_entity) {
                     // Update
